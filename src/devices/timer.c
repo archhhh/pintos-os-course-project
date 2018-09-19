@@ -29,7 +29,7 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
-bool compare(const struct list_elem *f, const struct list_elem *s, void* aux);
+bool compare_ticks(const struct list_elem *f, const struct list_elem *s, void* aux);
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void
@@ -96,7 +96,7 @@ timer_sleep (int64_t ticks)
   struct thread * current = thread_current();
   current->end_ticks = start+ticks;
   ASSERT (intr_get_level () == INTR_ON);
-  list_insert_ordered(&wait_list,&current->elem, compare, NULL);
+  list_insert_ordered(&wait_list,&current->elem, compare_ticks, NULL);
   thread_block();
   }
 }
@@ -258,7 +258,7 @@ real_time_delay (int64_t num, int32_t denom)
   ASSERT (denom % 1000 == 0);
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
 }
-bool compare(const struct list_elem*f, const struct list_elem*s, void *aux)
+bool compare_ticks(const struct list_elem*f, const struct list_elem*s, void *aux)
 {
 	return (list_entry(f, struct thread, elem))->end_ticks > (list_entry(s, struct thread, elem))->end_ticks;
 
