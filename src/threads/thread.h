@@ -4,7 +4,6 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
-
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -89,7 +88,7 @@ struct thread
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
-
+    int64_t end_ticks;
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
