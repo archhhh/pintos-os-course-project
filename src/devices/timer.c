@@ -92,12 +92,15 @@ timer_sleep (int64_t ticks)
 {
   if(ticks > 0)
   {
+  enum intr_level old_level;
   int64_t start = timer_ticks ();
   struct thread * current = thread_current();
   current->end_ticks = start+ticks;
   ASSERT (intr_get_level () == INTR_ON);
+  old_level = intr_disable();
   list_insert_ordered(&wait_list,&current->elem, compare_ticks, NULL);
   thread_block();
+  intr_set_level(old_level);
   }
 }
 
@@ -184,6 +187,9 @@ timer_interrupt (struct intr_frame *args UNUSED)
 	{
 		list_pop_back(&wait_list);
 		thread_unblock(sleeping_thread);
+	}else
+	{
+	 	break;
 	}
   }
 }
