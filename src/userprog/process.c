@@ -30,16 +30,17 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
-
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
-
+  char * save_ptr;
+  file_name = strtok_r((char*)file_name, " ", &save_ptr);
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -53,12 +54,12 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
-
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
+
   success = load (file_name, &if_.eip, &if_.esp);
 
   /* If load failed, quit. */
@@ -88,7 +89,8 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  return -1;
+   sema_down(&thread_current()->some_semaphore);
+   return -1;
 }
 
 /* Free the current process's resources. */
@@ -106,7 +108,7 @@ process_exit (void)
       /* Correct ordering here is crucial.  We must set
          cur->pagedir to NULL before switching page directories,
          so that a timer interrupt can't switch back to the
-         process page directory.  We must activate the base page
+        process page directory.  We must activate the base page
          directory before destroying the process's page
          directory, or our active page directory will be one
          that's been freed (and cleared). */
@@ -131,7 +133,7 @@ process_activate (void)
      interrupts. */
   tss_update ();
 }
-
+
 /* We load ELF binaries.  The following definitions are taken
    from the ELF specification, [ELF1], more-or-less verbatim.  */
 
@@ -195,7 +197,7 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (void **esp, char *args);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -220,9 +222,16 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
-
+  char * save_ptr;
+  char* fn_copy;
+  fn_copy = palloc_get_page (0);
+  if (fn_copy == NULL)
+    return TID_ERROR;
+  strlcpy(fn_copy, file_name, PGSIZE);
+  file_name = strtok_r((char*)file_name, " ", &save_ptr); 
   /* Open executable file. */
-  file = filesys_open (file_name);
+  printf("%s\n", file_name);
+  file= filesys_open (file_name);
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -300,9 +309,8 @@ load (const char *file_name, void (**eip) (void), void **esp)
           break;
         }
     }
-
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (esp, fn_copy))
     goto done;
 
   /* Start address. */
@@ -427,21 +435,68 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp) 
+setup_stack (void **esp, char *args) 
 {
   uint8_t *kpage;
   bool success = false;
-
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+     
       if (success)
-        *esp = PHYS_BASE;
-      else
+      {
+	*esp = PHYS_BASE;
+	char * token;
+    	char* fn_copy;
+	char* save_ptr;
+	fn_copy = palloc_get_page(0);
+	if(fn_copy == NULL)
+		return TID_ERROR;
+	strlcpy(fn_copy, args, PGSIZE);
+	int argc = 0;
+	for(token = strtok_r((char*)fn_copy, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr))
+		++argc;
+	void ** argv = palloc_get_page(0);
+	if(argv == NULL)
+		return TID_ERROR;
+	int i = 0;
+	for(token = strtok_r((char*)args, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr), ++i)
+	{
+		*esp -= strlen(token)+1;
+		memcpy(*esp, token, strlen(token)+1);
+		argv[i] = *esp;
+		printf("%s\n", argv[i]);
+	}
+	while((int)*esp%4 != 0)
+	{
+		*esp-=sizeof(char);
+		char temp = 0;
+		memcpy(*esp, &temp, sizeof(char));
+	}	
+	void * end = 0;
+	*esp -= sizeof(void*);
+	memcpy(*esp, &end, sizeof(void*));
+	for(;i >= 0; --i)
+	{
+	  *esp -= sizeof(void*);
+	  memcpy(*esp, &argv[i], sizeof(void*));
+	}
+	void* argv_addr = *esp;
+	*esp -= sizeof(void*);
+	memcpy(*esp, &argv_addr, sizeof(void*));
+	*esp -= sizeof(int);
+	memcpy(*esp, &argc, sizeof(int));
+	*esp -= sizeof(void*);
+	memcpy(*esp, &end, sizeof(void*));
+	palloc_free_page(fn_copy);
+	palloc_free_page(argv);
+
+      }else{
         palloc_free_page (kpage);
-    }
-  return success;
+      }
+  }
+	  return success;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel
