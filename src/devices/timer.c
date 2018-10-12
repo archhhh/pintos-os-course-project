@@ -19,7 +19,7 @@
 
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
-
+static struct list wait_list;
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
@@ -29,7 +29,7 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
-
+bool compare_ticks(const struct list_elem *f, const struct list_elem *s, void* aux);
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void
@@ -37,6 +37,7 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+  list_init(&wait_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -89,11 +90,18 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
+  if(ticks > 0)
+  {
+  enum intr_level old_level;
   int64_t start = timer_ticks ();
-
+  struct thread * current = thread_current();
+  current->end_ticks = start+ticks;
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  old_level = intr_disable();
+  list_insert_ordered(&wait_list,&current->elem, compare_ticks, NULL);
+  thread_block();
+  intr_set_level(old_level);
+  }
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -172,6 +180,18 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+  while(!list_empty(&wait_list))
+  {
+ 	struct thread * sleeping_thread = list_entry(list_back(&wait_list), struct thread, elem);
+	if(sleeping_thread->end_ticks < ticks)
+	{
+		list_pop_back(&wait_list);
+		thread_unblock(sleeping_thread);
+	}else
+	{
+	 	break;
+	}
+  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
@@ -243,4 +263,9 @@ real_time_delay (int64_t num, int32_t denom)
      the possibility of overflow. */
   ASSERT (denom % 1000 == 0);
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
+}
+bool compare_ticks(const struct list_elem*f, const struct list_elem*s, void *aux)
+{
+	return (list_entry(f, struct thread, elem))->end_ticks > (list_entry(s, struct thread, elem))->end_ticks;
+
 }
