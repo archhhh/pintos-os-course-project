@@ -230,7 +230,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
   strlcpy(fn_copy, file_name, PGSIZE);
   file_name = strtok_r((char*)file_name, " ", &save_ptr); 
   /* Open executable file. */
-  printf("%s\n", file_name);
   file= filesys_open (file_name);
   if (file == NULL) 
     {
@@ -466,7 +465,6 @@ setup_stack (void **esp, char *args)
 		*esp -= strlen(token)+1;
 		memcpy(*esp, token, strlen(token)+1);
 		argv[i] = *esp;
-		printf("%s\n", argv[i]);
 	}
 	while((int)*esp%4 != 0)
 	{
