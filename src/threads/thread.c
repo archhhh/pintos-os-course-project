@@ -171,21 +171,20 @@ thread_create (const char *name, int priority,
   struct switch_threads_frame *sf;
   tid_t tid;
   enum intr_level old_level;
-
   ASSERT (function != NULL);
   /* Allocate thread. */
   t = palloc_get_page (PAL_ZERO);
   if (t == NULL)
     return TID_ERROR;
-
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
+  list_push_back(&thread_current()->children, &t->elem);
+  t->parent = thread_current();
   /* Prepare thread for first run by initializing its stack.
      Do this atomically so intermediate values for the 'stack' 
      member cannot be observed. */
   old_level = intr_disable ();
-  t->parent = thread_current();
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;
@@ -205,8 +204,6 @@ thread_create (const char *name, int priority,
 
   /* Add to run queue. */
   thread_unblock (t);
-  if(t->priority > thread_current()->priority)
-	thread_yield();
   return tid;
 }
 
@@ -243,7 +240,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_insert_ordered(&ready_list, &t->elem, compare, NULL);
+  list_push_back(&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 
@@ -288,9 +285,9 @@ void
 thread_exit (void) 
 {
   ASSERT (!intr_context ());
-
 #ifdef USERPROG
   process_exit ();
+  sema_up(&thread_current()->parent->sync);
 #endif
 
   /* Remove thread from all threads list, set our status to dying,
@@ -300,7 +297,6 @@ thread_exit (void)
   list_remove (&thread_current()->allelem);
   thread_current ()->status = THREAD_DYING;
   schedule ();
-  sema_up(&thread_current()->parent->some_semaphore);
   NOT_REACHED ();
 }
 
@@ -316,7 +312,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_insert_ordered (&ready_list, &cur->elem, compare, NULL);
+    list_push_back (&ready_list, &cur->elem);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -344,13 +340,6 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
-  list_sort(&ready_list, compare, NULL);
-  if(!list_empty(&ready_list))
-  {
- 	 struct thread * first = list_entry(list_front(&ready_list), struct thread, elem);
-  	if(first->priority > thread_current()->priority)
-		thread_yield();
-  }
 }
 
 /* Returns the current thread's priority. */
@@ -475,7 +464,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
-  sema_init(&t->some_semaphore, 0);
+  t->fd = 2;
+  list_init(&t->children);
+  list_init(&t->files);
+  sema_init(&t->sync, 0);
   list_push_back (&all_list, &t->allelem);
 }
 
