@@ -89,10 +89,26 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-   sema_down(&thread_current()->some_semaphore);
-   return -1;
+/*	struct list_elem * e;
+	struct thread * curr = thread_current();
+	struct thread * child = NULL;
+	if(list_empty(&curr->children))
+		return -1;
+	for(e = list_begin(&curr->children); e != list_end(&curr->children); e = list_next(e)){
+		struct thread *t = list_entry(e, struct thread, elem);
+		if(t->tid == child_tid)
+		{	
+			child = t;
+			break;
+		}
+	}
+	if(!child)
+		return -1;
+	list_remove(&child->elem); */
+	sema_down(&thread_current()->sync);
+	
+	return 0;
 }
-
 /* Free the current process's resources. */
 void
 process_exit (void)
